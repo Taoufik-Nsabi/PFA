@@ -1,0 +1,174 @@
+services:
+  api-gateway:
+    build:
+      context: ./APIGateway
+      dockerfile: Dockerfile
+    container_name: sirmaroc-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Redis: redis:6379
+      Jwt__Issuer: UserService.Api
+      Jwt__Audience: UserService.Client
+      Jwt__SecretKey: "${JWT_SECRET_KEY:-ThisIsASecretKeyForJwtAuthDemo123!}"
+      Gateway__SharedSecret: "${GATEWAY_SHARED_SECRET:-change-me-gateway-secret}"
+      Services__Auth__BaseUrl: http://auth-service:8080
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-primary__Address: http://auth-service:8080
+      ReverseProxy__Clusters__matches-cluster__Destinations__matches-primary__Address: http://matches-service:8083
+      Cors__AllowedOrigins__0: http://localhost:3000
+      Cors__AllowedOrigins__1: http://localhost:5173
+    depends_on:
+      auth-service:
+        condition: service_started
+      matches-service:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - sirmaroc-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sirmaroc-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - sirmaroc-net
+
+  auth-service:
+    build:
+      context: ./SirMarocUser
+      dockerfile: UserService.Api/Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "5197:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Server=auth-sqlserver,1433;Database=UserServiceDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True
+      Jwt__Issuer: UserService.Api
+      Jwt__Audience: UserService.Client
+      Jwt__Key: "${JWT_SECRET_KEY:-ThisIsASecretKeyForJwtAuthDemo123!}"
+      Auth__Email: admin@sirmaroc.com
+      Auth__Password: admin123
+      Auth__Role: Admin
+      App__BackendUrl: http://localhost:8080
+    depends_on:
+      auth-sqlserver:
+        condition: service_healthy
+      auth-db-init:
+        condition: service_completed_successfully
+    networks:
+      - sirmaroc-net
+
+  auth-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: auth-sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    ports:
+      - "1433:1433"
+    volumes:
+      - auth_sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q \"SELECT 1\" -C || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - sirmaroc-net
+
+  auth-db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: auth-sqlserver-init
+    depends_on:
+      auth-sqlserver:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >
+        /opt/mssql-tools18/bin/sqlcmd -S auth-sqlserver -U sa -P "$$SA_PASSWORD" -Q "IF DB_ID('UserServiceDb') IS NULL CREATE DATABASE [UserServiceDb];" -C
+    environment:
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    restart: "no"
+    networks:
+      - sirmaroc-net
+
+  matches-service:
+    build:
+      context: ./microservice-matchs
+      dockerfile: Dockerfile
+    container_name: matches-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8083
+      DB_URL: jdbc:sqlserver://matches-sqlserver:1433;databaseName=sirmaroc_matchs;encrypt=true;trustServerCertificate=true
+      DB_USERNAME: sa
+      DB_PASSWORD: YourStrong@Passw0rd
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      GATEWAY_TRUST_ENABLED: "true"
+      GATEWAY_SHARED_SECRET: "${GATEWAY_SHARED_SECRET:-change-me-gateway-secret}"
+    depends_on:
+      matches-sqlserver:
+        condition: service_healthy
+      matches-db-init:
+        condition: service_completed_successfully
+    networks:
+      - sirmaroc-net
+
+  matches-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: matches-sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    ports:
+      - "1434:1433"
+    volumes:
+      - matches_sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q \"SELECT 1\" -C || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - sirmaroc-net
+
+  matches-db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: matches-sqlserver-init
+    depends_on:
+      matches-sqlserver:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >
+        /opt/mssql-tools18/bin/sqlcmd -S matches-sqlserver -U sa -P "$$SA_PASSWORD" -Q "IF DB_ID('sirmaroc_matchs') IS NULL CREATE DATABASE [sirmaroc_matchs];" -C
+    environment:
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    restart: "no"
+    networks:
+      - sirmaroc-net
+
+volumes:
+  auth_sqlserver_data:
+  matches_sqlserver_data:
+
+networks:
+  sirmaroc-net:
+    name: sirmaroc-net
+    driver: bridge

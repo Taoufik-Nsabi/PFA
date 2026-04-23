@@ -1,0 +1,17 @@
+.idea/
+.vs/
+.m2-local/
+
+**/bin/
+**/obj/
+**/target/
+
+*.iml
+*.log
+*.user
+
+.env
+**/.env
+**/.env.*
+!.env.example
+!.env.exemple

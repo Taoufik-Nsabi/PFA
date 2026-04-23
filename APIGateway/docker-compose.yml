@@ -1,0 +1,40 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sirmaroc-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Redis: redis:6379
+      Jwt__Issuer: UserService.Api
+      Jwt__Audience: UserService.Client
+      Jwt__SecretKey: "${JWT_SECRET_KEY:-ThisIsASecretKeyForJwtAuthDemo123!}"
+      Gateway__SharedSecret: "${GATEWAY_SHARED_SECRET:-change-me-gateway-secret}"
+      Services__Auth__BaseUrl: http://auth-service:8080
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-primary__Address: http://auth-service:8080
+      ReverseProxy__Clusters__matches-cluster__Destinations__matches-primary__Address: http://matches-service:8083
+      Cors__AllowedOrigins__0: http://localhost:3000
+      Cors__AllowedOrigins__1: http://localhost:5173
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - sirmaroc-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sirmaroc-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - sirmaroc-net
+
+networks:
+  sirmaroc-net:
+    name: sirmaroc-net
+    driver: bridge

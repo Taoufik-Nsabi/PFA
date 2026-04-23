@@ -1,0 +1,69 @@
+services:
+  auth-service:
+    build:
+      context: .
+      dockerfile: UserService.Api/Dockerfile
+    container_name: auth-service
+    ports:
+      - "5197:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      sqlserver-init:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Server=sqlserver,1433;Database=UserServiceDb;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True
+      Jwt__Issuer: UserService.Api
+      Jwt__Audience: UserService.Client
+      Jwt__Key: "${JWT_SECRET_KEY:-ThisIsASecretKeyForJwtAuthDemo123!}"
+      Auth__Email: admin@sirmaroc.com
+      Auth__Password: admin123
+      Auth__Role: Admin
+      App__BackendUrl: http://localhost:8080
+    networks:
+      - sirmaroc-net
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: userservice-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q \"SELECT 1\" -C || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - sirmaroc-net
+
+  sqlserver-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: userservice-sqlserver-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P "$$SA_PASSWORD" -Q "IF DB_ID('UserServiceDb') IS NULL CREATE DATABASE [UserServiceDb];" -C
+    environment:
+      SA_PASSWORD: "YourStrong@Passw0rd"
+    restart: "no"
+    networks:
+      - sirmaroc-net
+
+volumes:
+  sqlserver_data:
+
+networks:
+  sirmaroc-net:
+    name: sirmaroc-net
